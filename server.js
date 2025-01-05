@@ -91,7 +91,7 @@ wss.on("connection", (clientWs) => {
     // クライアントが切断したとき
     clientWs.on("close", () => {
         console.log("Client disconnected");
-        openAiWs.close();
+        openAiWS.close();
     });
 });
 
