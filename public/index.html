@@ -29,54 +29,162 @@
 </head>
 <body>
   <h1>AirOrder Order System</h1>
+  <div id="status"></div>
   <div id="messages"></div>
   <input type="text" id="input" placeholder="Type your message here..." />
   <button id="send">Send</button>
+  <button id="start">Order Start</button>
 
   <script>
     const ws = new WebSocket(`ws://${window.location.host}`);
-
+    const statusDiv = document.getElementById('status');
     const messagesDiv = document.getElementById("messages");
+
     const input = document.getElementById("input");
     const sendButton = document.getElementById("send");
+    const startButton = document.getElementById("start");
 
     let partialResponse = ""; // 部分応答を蓄積する変数
+    // 音声データキュー
+    const audioQueue = [];
+    let isPlaying = false;
+
+    // Web Audio APIのセットアップ
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+    // 音声データをキューに追加
+    function enqueueAudio(base64AudioData) {
+        audioQueue.push(base64AudioData);
+        playNextAudio();
+    }
+
+
+    function addWavHeader(samples, sampleRate, bitDepth, numChannels) {
+        const byteRate = (sampleRate * numChannels * bitDepth) / 8;
+        const blockAlign = (numChannels * bitDepth) / 8;
+        const dataSize = samples.byteLength;
+        const buffer = new ArrayBuffer(44 + dataSize);
+        const view = new DataView(buffer);
+
+        // RIFF チャンク
+        writeString(view, 0, "RIFF");
+        view.setUint32(4, 36 + dataSize, true); // ファイル全体のサイズ
+        writeString(view, 8, "WAVE");
+
+        // fmt チャンク
+        writeString(view, 12, "fmt ");
+        view.setUint32(16, 16, true); // fmt チャンクのサイズ
+        view.setUint16(20, 1, true); // オーディオフォーマット (1 = PCM)
+        view.setUint16(22, numChannels, true); // チャンネル数
+        view.setUint32(24, sampleRate, true); // サンプルレート
+        view.setUint32(28, byteRate, true); // バイトレート
+        view.setUint16(32, blockAlign, true); // ブロックアライン
+        view.setUint16(34, bitDepth, true); // ビット深度
+
+        // data チャンク
+        writeString(view, 36, "data");
+        view.setUint32(40, dataSize, true); // データサイズ
+
+        // PCM データをコピー
+        new Uint8Array(buffer, 44).set(new Uint8Array(samples));
+
+        return buffer;
+    }
+
+    function writeString(view, offset, string) {
+      for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+      }
+    }
+
+    // キューの次の音声を再生
+    function playNextAudio() {
+        if (isPlaying || audioQueue.length === 0) {
+            return; // 再生中かキューが空の場合は処理しない
+        }
+
+        // キューから音声データを取り出して再生
+        const base64AudioData = audioQueue.shift();  // 最初の音声データを取得
+        isPlaying = true;
+
+        // Base64デコードしてArrayBufferに変換
+        const binaryData = atob(base64AudioData);  // Base64文字列をデコード
+        const arrayBuffer = new ArrayBuffer(binaryData.length);
+        const uint8Array = new Uint8Array(arrayBuffer);
+
+        const audioBuffer = Uint8Array.from(binaryData, (c) => c.charCodeAt(0));
+
+        // バイナリデータをUint8Arrayにコピー
+        for (let i = 0; i < binaryData.length; i++) {
+            uint8Array[i] = binaryData.charCodeAt(i);
+        }
+        const waveData = addWavHeader(arrayBuffer, 24000, 16, 1)
+    
+        // AudioBufferにデコードして再生
+        audioContext.decodeAudioData(waveData, (buffer) => {
+            const source = audioContext.createBufferSource();
+            source.buffer = buffer;
+            source.connect(audioContext.destination);
+            source.onended = () => {
+                isPlaying = false;  // 再生終了後、次の音声の再生準備
+                playNextAudio();    // 次の音声を再生
+            };
+            source.start(0);  // 即座に再生
+        }, (error) => {
+            console.error('Error decoding audio data', error);
+        });
+    }
 
     // WebSocketメッセージの受信
     ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
+        const data = JSON.parse(event.data);
 
-      if (data.type === "delta") {
-        // 部分応答の更新（リアルタイムでテキストを表示）
-        partialResponse += data.text;
-        messagesDiv.textContent = `ChatGPT: ${partialResponse}`;
-        messagesDiv.scrollTop = messagesDiv.scrollHeight; // スクロールを最下部に
-      } else if (data.type === "final") {
-        // 最終応答の完了
-        const finalMessage = document.createElement("div");
-        messagesDiv.appendChild(finalMessage);
-        messagesDiv.scrollTop = messagesDiv.scrollHeight;
-        partialResponse = ""; // 次のメッセージのためにリセット
-      }
+        if (data.type === "delta.audio") {
+            const base64AudioData = data.text;  // Base64エンコードされた音声データ
+            enqueueAudio(base64AudioData);  // 音声データをキューに追加    
+        }else if (data.type === "delta.text") {
+            // 部分応答の更新（リアルタイムでテキストを表示）
+            partialResponse += data.text;
+            messagesDiv.textContent = `ChatGPT: ${partialResponse}`;
+            messagesDiv.scrollTop = messagesDiv.scrollHeight; // スクロールを最下部に
+        } else if (data.type === "final") {
+            // 最終応答の完了
+            const finalMessage = document.createElement("div");
+            messagesDiv.appendChild(finalMessage);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            partialResponse = ""; // 次のメッセージのためにリセット
+        }
     };
 
     // メッセージを送信
     sendButton.addEventListener("click", () => {
-      const message = input.value.trim();
-      if (message) {
-        ws.send(message);
-        const userMessage = document.createElement("div");
-        userMessage.textContent = `You: ${message}`;
-        messagesDiv.appendChild(userMessage);
-        input.value = "";
-      }
+        const message = input.value.trim();
+        if (message) {
+            // 部分的な応答をリアルタイムで表示
+            ws.send(JSON.stringify({
+                type : "sendChat",
+                text : message,
+            }));
+
+            const userMessage = document.createElement("div");
+            userMessage.textContent = `You: ${message}`;
+            messagesDiv.appendChild(userMessage);
+            input.value = "";
+        }
+    });
+
+    startButton.addEventListener("click", () => {
+        ws.send(JSON.stringify({
+            type : "startOrder",
+            text : "",
+        }));
     });
 
     // Enterキーで送信
     input.addEventListener("keypress", (event) => {
-      if (event.key === "Enter") {
-        sendButton.click();
-      }
+        if (event.key === "Enter") {
+            sendButton.click();
+        }
     });
   </script>
 </body>
