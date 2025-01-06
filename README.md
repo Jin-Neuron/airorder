@@ -5,6 +5,10 @@
 
 ## Useage
 
+### Clone Repository
+
+`$git clone https://github.com/Jin-Neuron/airorder.git -b develop`
+
 ### Install Module
 
 `$npm install`
