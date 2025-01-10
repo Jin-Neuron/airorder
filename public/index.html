@@ -34,31 +34,100 @@
   <input type="text" id="input" placeholder="Type your message here..." />
   <button id="send">Send</button>
   <button id="start">Order Start</button>
+  <button id="startInput">Start Microphone</button>
+  <button id="stopInput">Stop Microphone</button>
 
   <script>
     const ws = new WebSocket(`ws://${window.location.host}`);
     const statusDiv = document.getElementById('status');
     const messagesDiv = document.getElementById("messages");
+    let realtimeMSG;
+    let inputMSG;
 
     const input = document.getElementById("input");
     const sendButton = document.getElementById("send");
     const startButton = document.getElementById("start");
+    const startTalk = document.getElementById("startInput");
+    const stopTalk = document.getElementById("stopInput");
 
     let partialResponse = ""; // 部分応答を蓄積する変数
+    let finalInput = "";
     // 音声データキュー
     const audioQueue = [];
     let isPlaying = false;
-
+    let audioStream; // マイク入力のストリーム
+    let workletNode;
+    const samplerate = 24000
     // Web Audio APIのセットアップ
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const audioContext = new AudioContext({
+        sampleRate: samplerate  // サンプリングレートを48kHzに設定
+    });
+    // マイク入力を開始
+    async function startMicrophone() {
+        try {
+            await audioContext.audioWorklet.addModule('worklet-processor.js');
+            // マイクからの音声を取得
+            audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const input = audioContext.createMediaStreamSource(audioStream);
 
+            workletNode = new AudioWorkletNode(audioContext, 'audio-processor');
+
+            workletNode.port.onmessage = (event) => {
+                const inputData = event.data;
+                const base64Chunk = base64EncodeAudio(inputData); // PCM 16bit に変換
+                ws.send(JSON.stringify({
+                    type: "recordStream",
+                    text: base64Chunk
+                }));
+            };
+            input.connect(workletNode);
+        } catch (err) {
+            console.error("Error accessing microphone:", err);
+        }
+    }
+
+    // マイク入力を停止
+    function stopMicrophone() {
+        //console.log("stop Mic");
+        if (audioStream) {
+            const tracks = audioStream.getTracks();
+            tracks.forEach((track) => track.stop());
+            // AudioWorkletProcessor に停止命令を送信
+            workletNode.port.postMessage('stop');
+            ws.send(JSON.stringify({
+                type: "stopStream",
+                text: ""
+            }));
+        }
+    } 
+    // Converts Float32Array of audio data to PCM16 ArrayBuffer
+    function floatTo16BitPCM(float32Array) {
+        const buffer = new ArrayBuffer(float32Array.length * 2);
+        const view = new DataView(buffer);
+        let offset = 0;
+        for (let i = 0; i < float32Array.length; i++, offset += 2) {
+            let s = Math.max(-1, Math.min(1, float32Array[i]));
+            view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+        }
+        return buffer;
+    }
+    // Converts a Float32Array to base64-encoded PCM16 data
+    function base64EncodeAudio(float32Array) {
+        const arrayBuffer = floatTo16BitPCM(float32Array);
+        let binary = '';
+        let bytes = new Uint8Array(arrayBuffer);
+        const chunkSize = 0x8000; // 32KB chunk size
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+            let chunk = bytes.subarray(i, i + chunkSize);
+            binary += String.fromCharCode.apply(null, chunk);
+        }
+        return btoa(binary);
+    }
     // 音声データをキューに追加
     function enqueueAudio(base64AudioData) {
         audioQueue.push(base64AudioData);
         playNextAudio();
     }
-
-
     function addWavHeader(samples, sampleRate, bitDepth, numChannels) {
         const byteRate = (sampleRate * numChannels * bitDepth) / 8;
         const blockAlign = (numChannels * bitDepth) / 8;
@@ -118,7 +187,7 @@
         for (let i = 0; i < binaryData.length; i++) {
             uint8Array[i] = binaryData.charCodeAt(i);
         }
-        const waveData = addWavHeader(arrayBuffer, 24000, 16, 1)
+        const waveData = addWavHeader(arrayBuffer, samplerate, 16, 1)
     
         // AudioBufferにデコードして再生
         audioContext.decodeAudioData(waveData, (buffer) => {
@@ -144,15 +213,26 @@
             enqueueAudio(base64AudioData);  // 音声データをキューに追加    
         }else if (data.type === "delta.text") {
             // 部分応答の更新（リアルタイムでテキストを表示）
+            if(partialResponse == ""){
+                realtimeMSG = document.createElement("div");
+                messagesDiv.appendChild(realtimeMSG);
+            }
             partialResponse += data.text;
-            messagesDiv.textContent = `ChatGPT: ${partialResponse}`;
+            realtimeMSG.textContent = `ChatGPT: ${partialResponse}`;
             messagesDiv.scrollTop = messagesDiv.scrollHeight; // スクロールを最下部に
-        } else if (data.type === "final") {
-            // 最終応答の完了
-            const finalMessage = document.createElement("div");
-            messagesDiv.appendChild(finalMessage);
-            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }else if (data.type === "final.text") {
             partialResponse = ""; // 次のメッセージのためにリセット
+            //入力用divを挿入してaudio/text入力を待機
+            if(finalInput == "") {
+                inputMSG = document.createElement("div");
+                messagesDiv.appendChild(inputMSG);
+            }
+        }else if(data.type === "final.audio") {
+            if(finalInput == "") {
+                inputMSG.textContent = `you: ${data.text}`;
+                messagesDiv.scrolltop = messagesDiv.scrollheight; //最下部スクロール
+                finalInput = "";
+            }
         }
     };
 
@@ -160,15 +240,16 @@
     sendButton.addEventListener("click", () => {
         const message = input.value.trim();
         if (message) {
-            // 部分的な応答をリアルタイムで表示
+            //テキスト入力メッセージを表示
             ws.send(JSON.stringify({
                 type : "sendChat",
                 text : message,
             }));
-
-            const userMessage = document.createElement("div");
-            userMessage.textContent = `You: ${message}`;
-            messagesDiv.appendChild(userMessage);
+            if(finalInput == "") {
+                inputMSG.textContent = `you: ${message}`;
+                messagesDiv.scrolltop = messagesDiv.scrollheight; //最下部スクロール
+                finalInput = "";
+            }
             input.value = "";
         }
     });
@@ -185,6 +266,12 @@
         if (event.key === "Enter") {
             sendButton.click();
         }
+    });
+    startTalk.addEventListener("click", () => {
+        startMicrophone();
+    });
+    stopTalk.addEventListener("click", () => {
+        stopMicrophone();
     });
   </script>
 </body>

@@ -18,7 +18,7 @@ let isOrdering = false;
 wss.on("connection", (clientWs) => {
     console.log("Client connected");
 
-    const url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17";
+    const url = "wss://api.openai.com/v1/realtime?model=gpt-4o-mini-realtime-preview-2024-12-17";
     const openAiWS = new WebSocket(url, {
         headers: {
             "Authorization": "Bearer " + process.env.OPENAI_API_KEY,
@@ -45,7 +45,6 @@ wss.on("connection", (clientWs) => {
         const serverEvent = JSON.parse(data);
 
         if(serverEvent.type === "sendChat" && isOrdering){
-            console.log("Message from client:", serverEvent.text);
             
             const event = {
                 type: 'conversation.item.create',
@@ -61,6 +60,7 @@ wss.on("connection", (clientWs) => {
             openAiWS.send(JSON.stringify(event));
             openAiWS.send(JSON.stringify({type: 'response.create'}));
         }else if (serverEvent.type === "startOrder" && !isOrdering){
+            console.log("Order Started.");
             isOrdering = true;
             //注文仕様へ設定
             const event = {
@@ -77,6 +77,17 @@ wss.on("connection", (clientWs) => {
 
             openAiWS.send(JSON.stringify(event));
             openAiWS.send(JSON.stringify({type: 'response.create'}));
+        }else if (serverEvent.type === "recordStream"){
+            //音声ストリームの開始
+            openAiWS.send(JSON.stringify({
+                type: 'input_audio_buffer.append',
+                audio: serverEvent.text
+            }));
+        }else if (serverEvent.type === "stopStream"){
+            //音声ストリームの終了
+            //bufferのcommitを送信後、responseをcreate
+            openAiWS.send(JSON.stringify({type: 'input_audio_buffer.commit'}));
+            openAiWS.send(JSON.stringify({type: 'response.create'}));
         }
     });
 
@@ -91,20 +102,27 @@ wss.on("connection", (clientWs) => {
                 text : serverEvent.delta,
             }));
             // Access Base64-encoded audio chunks
-        }
-        //console.log(serverEvent)
-        if (serverEvent.type === "response.audio_transcript.delta") {
-            // 部分的な応答をリアルタイムで表示
+        }else if (serverEvent.type === "response.audio_transcript.delta") {
+            // 部分的な応答をリアルタイムで通知
             clientWs.send(JSON.stringify({
                 type : "delta.text",
                 text : serverEvent.delta,
             }));
-        }
-        if (serverEvent.type === "response.done") {
+        }else if (serverEvent.type === "response.done") {
+            //テキストは随時送信しているため、空文字列で終了を通知
             clientWs.send(JSON.stringify({
-                type : "final",
+                type : "final.text",
                 text : "",
             }));
+        }else if (serverEvent.type === "conversation.item.input_audio_transcription.completed"){
+            //オーディオ入力の文字起こし完了
+            clientWs.send(JSON.stringify({
+                type : "final.audio",
+                text : serverEvent.transcript
+            }));
+        }else if (serverEvent.type === "response.done" &&
+                    serverEvent.response.status === "failed"){
+            console.log(serverEvent.response.status_details.error);
         }
     });
 
@@ -118,6 +136,7 @@ wss.on("connection", (clientWs) => {
     clientWs.on("close", () => {
         console.log("Client disconnected");
         openAiWS.close();
+        isOrdering = false;
     });
 });
 
