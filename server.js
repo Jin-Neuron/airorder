@@ -12,13 +12,17 @@ app.use(express.static("public"));
 // WebSocketサーバーを作成
 const wss = new WebSocket.Server({ noServer: true });
 const config = fs.readFileSync("./settingPrompt.txt", 'utf8');
+const model_4o = "gpt-4o-realtime-preview-2024-12-17";
+const model_4o_mini = "gpt-4o-mini-realtime-preview-2024-12-17";
+
 let isOrdering = false;
 
 // WebSocket接続の処理
 wss.on("connection", (clientWs) => {
     console.log("Client connected");
 
-    const url = "wss://api.openai.com/v1/realtime?model=gpt-4o-mini-realtime-preview-2024-12-17";
+
+    const url = "wss://api.openai.com/v1/realtime?model=" + model_4o;
     const openAiWS = new WebSocket(url, {
         headers: {
             "Authorization": "Bearer " + process.env.OPENAI_API_KEY,
@@ -33,6 +37,7 @@ wss.on("connection", (clientWs) => {
         openAiWS.send(JSON.stringify({
             type: 'session.update',
             session: {
+                instructions: config.toString(),
                 voice: 'sage',
                 input_audio_transcription: { model: 'whisper-1' },
                 turn_detection: { type: "server_vad" }
@@ -70,7 +75,7 @@ wss.on("connection", (clientWs) => {
                     role: 'user',
                     content: [{
                         type: 'input_text',
-                        text: config.toString(),
+                        text: '注文を開始してください。',
                     }]
                 }
             };
