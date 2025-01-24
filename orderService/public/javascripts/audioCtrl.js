@@ -1,4 +1,4 @@
-const ws = new WebSocket(`ws://${window.location.host}`);
+const socket = io();
 const statusDiv = document.getElementById('status');
 const messagesDiv = document.getElementById("messages");
 let realtimeMSG;
@@ -26,7 +26,7 @@ const audioContext = new AudioContext({
 // マイク入力を開始
 async function startMicrophone() {
     try {
-        await audioContext.audioWorklet.addModule('worklet-processor.js');
+        await audioContext.audioWorklet.addModule('/javascripts/worklet-processor.js');
         // マイクからの音声を取得
         audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         const input = audioContext.createMediaStreamSource(audioStream);
@@ -40,10 +40,7 @@ async function startMicrophone() {
         workletNode.port.onmessage = (event) => {
             const inputData = event.data;
             const base64Chunk = base64EncodeAudio(inputData); // PCM 16bit に変換
-            ws.send(JSON.stringify({
-                type: "recordStream",
-                text: base64Chunk
-            }));
+            socket.emit("recordStream", base64Chunk);
         };
         input.connect(workletNode);
     } catch (err) {
@@ -59,10 +56,7 @@ function stopMicrophone() {
         tracks.forEach((track) => track.stop());
         // AudioWorkletProcessor に停止命令を送信
         workletNode.port.postMessage('stop');
-        ws.send(JSON.stringify({
-            type: "stopStream",
-            text: ""
-        }));
+        socket.emit("stopStream", "");
     }
 } 
 // Converts Float32Array of audio data to PCM16 ArrayBuffer
@@ -170,46 +164,42 @@ function playNextAudio() {
 }
 
 // WebSocketメッセージの受信
-ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-
-    if (data.type === "delta.audio") {
-        const base64AudioData = data.text;  // Base64エンコードされた音声データ
-        enqueueAudio(base64AudioData);  // 音声データをキューに追加    
-    }else if (data.type === "delta.text") {
-        // 部分応答の更新（リアルタイムでテキストを表示）
-        if(partialResponse == ""){
-            realtimeMSG = document.createElement("div");
-            messagesDiv.appendChild(realtimeMSG);
-        }
-        partialResponse += data.text;
-        realtimeMSG.textContent = `ChatGPT: ${partialResponse}`;
-        messagesDiv.scrollTop = messagesDiv.scrollHeight; // スクロールを最下部に
-    }else if (data.type === "final.text") {
-        partialResponse = ""; // 次のメッセージのためにリセット
-        //入力用divを挿入してaudio/text入力を待機
-        if(finalInput == "") {
-            inputMSG = document.createElement("div");
-            messagesDiv.appendChild(inputMSG);
-        }
-    }else if(data.type === "final.audio") {
-        if(finalInput == "") {
-            inputMSG.textContent = `you: ${data.text}`;
-            messagesDiv.scrolltop = messagesDiv.scrollheight; //最下部スクロール
-            finalInput = "";
-        }
+socket.on("delta.audio", (msg) => {
+    const base64AudioData = msg;  // Base64エンコードされた音声データ
+    enqueueAudio(base64AudioData);  // 音声データをキューに追加    
+});
+socket.on("delta.text", (msg) => {
+    // 部分応答の更新（リアルタイムでテキストを表示）
+    if(partialResponse == ""){
+        realtimeMSG = document.createElement("div");
+        messagesDiv.appendChild(realtimeMSG);
     }
-};
+    partialResponse += msg;
+    realtimeMSG.textContent = `ChatGPT: ${partialResponse}`;
+    messagesDiv.scrollTop = messagesDiv.scrollHeight; // スクロールを最下部に
+});
+socket.on("final.text", (msg) => {
+    partialResponse = ""; // 次のメッセージのためにリセット
+    //入力用divを挿入してaudio/text入力を待機
+    if(finalInput == "") {
+        inputMSG = document.createElement("div");
+        messagesDiv.appendChild(inputMSG);
+    }
+});
+socket.on("final.audio", (msg) => {
+    if(finalInput == "") {
+        inputMSG.textContent = `you: ${msg}`;
+        messagesDiv.scrolltop = messagesDiv.scrollheight; //最下部スクロール
+        finalInput = "";
+    }
+});
 
 // メッセージを送信
 sendButton.addEventListener("click", () => {
     const message = input.value.trim();
     if (message) {
         //テキスト入力メッセージを表示
-        ws.send(JSON.stringify({
-            type : "sendChat",
-            text : message,
-        }));
+        socket.emit("sendChat", message);
         if(finalInput == "") {
             inputMSG.textContent = `you: ${message}`;
             messagesDiv.scrolltop = messagesDiv.scrollheight; //最下部スクロール
@@ -220,10 +210,7 @@ sendButton.addEventListener("click", () => {
 });
 
 startButton.addEventListener("click", () => {
-    ws.send(JSON.stringify({
-        type : "startOrder",
-        text : "",
-    }));
+    socket.emit("startOrder", "aaa");
 });
 
 // Enterキーで送信

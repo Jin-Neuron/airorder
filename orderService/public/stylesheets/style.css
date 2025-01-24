@@ -1,0 +1,23 @@
+body {
+  padding: 50px;
+  font: 14px "Lucida Grande", Helvetica, Arial, sans-serif;
+}
+
+a {
+  color: #00B7FF;
+}
+#messages {
+  border: 1px solid #ccc;
+  padding: 10px;
+  height: 300px;
+  overflow-y: scroll;
+  margin-bottom: 10px;
+  white-space: pre-wrap; /* 改行を保持 */
+}
+input {
+  width: calc(100% - 100px);
+  padding: 10px;
+}
+button {
+  padding: 10px;
+}

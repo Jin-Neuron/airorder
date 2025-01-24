@@ -1,0 +1,22 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= title %></title>
+  <link rel='stylesheet' href='/stylesheets/style.css' />
+</head>
+<body>
+  <h1><%= title %></h1>
+  <div id="status"></div>
+  <div id="messages"></div>
+  <input type="text" id="input" placeholder="Type your message here..." />
+  <button id="send">Send</button>
+  <button id="start">Order Start</button>
+  <button id="startInput">Start Microphone</button>
+  <button id="stopInput">Stop Microphone</button>
+  <script type = "text/javascript" src="/socket.io/socket.io.js"></script>
+  <script type="text/javascript" src="/javascripts/audioCtrl.js"></script>
+</body>
+</html>
