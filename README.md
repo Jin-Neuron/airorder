@@ -5,6 +5,9 @@
 
 ## Useage
 
+### Change Directory into orderService
+`$cd orderService`
+
 ### Install Module
 
 `$npm install`
@@ -15,7 +18,7 @@
 
 ### Start Server
 
-`$node server.js`
+`$npm start`
 
 ### Access WebAPP
 
