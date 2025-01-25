@@ -27,7 +27,7 @@ var server = http.createServer(app);
  */
 
 server.listen(port, () => {
-    console.log(`start listening on *:${port}`);
+    console.log(`Server is running at http://localhost:${port}`);
 });
 server.on('error', onError);
 server.on('listening', onListening);

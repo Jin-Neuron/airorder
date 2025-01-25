@@ -11,7 +11,6 @@ const startTalk = document.getElementById("startInput");
 const stopTalk = document.getElementById("stopInput");
 
 let partialResponse = ""; // 部分応答を蓄積する変数
-let finalInput = "";
 // 音声データキュー
 const audioQueue = [];
 let isPlaying = false;
@@ -82,11 +81,6 @@ function base64EncodeAudio(float32Array) {
     }
     return btoa(binary);
 }
-// 音声データをキューに追加
-function enqueueAudio(base64AudioData) {
-    audioQueue.push(base64AudioData);
-    playNextAudio();
-}
 function addWavHeader(samples, sampleRate, bitDepth, numChannels) {
     const byteRate = (sampleRate * numChannels * bitDepth) / 8;
     const blockAlign = (numChannels * bitDepth) / 8;
@@ -118,6 +112,24 @@ function addWavHeader(samples, sampleRate, bitDepth, numChannels) {
 
     return buffer;
 }
+// 音声データをキューに追加
+function enqueueAudio(base64AudioData) {
+    // Base64デコードしてArrayBufferに変換
+    const binaryData = atob(base64AudioData);  // Base64文字列をデコード
+    const arrayBuffer = new ArrayBuffer(binaryData.length);
+    const uint8Array = new Uint8Array(arrayBuffer);
+
+    const audioBuffer = Uint8Array.from(binaryData, (c) => c.charCodeAt(0));
+
+    // バイナリデータをUint8Arrayにコピー
+    for (let i = 0; i < binaryData.length; i++) {
+        uint8Array[i] = binaryData.charCodeAt(i);
+    }
+    const waveData = addWavHeader(arrayBuffer, samplerate, 16, 1)
+
+    audioQueue.unshift(waveData);
+    playNextAudio();
+}
 
 function writeString(view, offset, string) {
   for (let i = 0; i < string.length; i++) {
@@ -132,21 +144,8 @@ function playNextAudio() {
     }
 
     // キューから音声データを取り出して再生
-    const base64AudioData = audioQueue.shift();  // 最初の音声データを取得
+    const waveData = audioQueue.pop();
     isPlaying = true;
-
-    // Base64デコードしてArrayBufferに変換
-    const binaryData = atob(base64AudioData);  // Base64文字列をデコード
-    const arrayBuffer = new ArrayBuffer(binaryData.length);
-    const uint8Array = new Uint8Array(arrayBuffer);
-
-    const audioBuffer = Uint8Array.from(binaryData, (c) => c.charCodeAt(0));
-
-    // バイナリデータをUint8Arrayにコピー
-    for (let i = 0; i < binaryData.length; i++) {
-        uint8Array[i] = binaryData.charCodeAt(i);
-    }
-    const waveData = addWavHeader(arrayBuffer, samplerate, 16, 1)
 
     // AudioBufferにデコードして再生
     audioContext.decodeAudioData(waveData, (buffer) => {
@@ -181,17 +180,12 @@ socket.on("delta.text", (msg) => {
 socket.on("final.text", (msg) => {
     partialResponse = ""; // 次のメッセージのためにリセット
     //入力用divを挿入してaudio/text入力を待機
-    if(finalInput == "") {
-        inputMSG = document.createElement("div");
-        messagesDiv.appendChild(inputMSG);
-    }
+    inputMSG = document.createElement("div");
+    messagesDiv.appendChild(inputMSG);
 });
 socket.on("final.audio", (msg) => {
-    if(finalInput == "") {
-        inputMSG.textContent = `you: ${msg}`;
-        messagesDiv.scrolltop = messagesDiv.scrollheight; //最下部スクロール
-        finalInput = "";
-    }
+    inputMSG.textContent = `you: ${msg}`;
+    messagesDiv.scrolltop = messagesDiv.scrollheight; //最下部スクロール
 });
 
 // メッセージを送信
@@ -200,11 +194,8 @@ sendButton.addEventListener("click", () => {
     if (message) {
         //テキスト入力メッセージを表示
         socket.emit("sendChat", message);
-        if(finalInput == "") {
-            inputMSG.textContent = `you: ${message}`;
-            messagesDiv.scrolltop = messagesDiv.scrollheight; //最下部スクロール
-            finalInput = "";
-        }
+        inputMSG.textContent = `you: ${message}`;
+        messagesDiv.scrolltop = messagesDiv.scrollheight; //最下部スクロール
         input.value = "";
     }
 });

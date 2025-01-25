@@ -34,7 +34,8 @@ const realtimeAPI = (server) => {
                     instructions: config.toString(),
                     voice: 'sage',
                     input_audio_transcription: { model: 'whisper-1' },
-                    turn_detection: { type: "server_vad" }
+                    turn_detection: { type: "server_vad" },
+                    max_response_output_tokens: 512,
                 }
             }));
         });
